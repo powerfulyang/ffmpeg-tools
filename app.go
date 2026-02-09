@@ -89,6 +89,24 @@ func (a *App) SelectInputFile() (string, error) {
 	return file, err
 }
 
+// SelectInputFiles opens a file dialog to select multiple MOV files
+func (a *App) SelectInputFiles() ([]string, error) {
+	files, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择 MOV 文件（可多选）",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "MOV 视频文件",
+				Pattern:     "*.mov",
+			},
+			{
+				DisplayName: "所有视频文件",
+				Pattern:     "*.mov;*.mp4;*.avi;*.mkv",
+			},
+		},
+	})
+	return files, err
+}
+
 // SelectOutputFolder opens a folder dialog to select output directory
 func (a *App) SelectOutputFolder() (string, error) {
 	folder, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{

@@ -26,51 +26,84 @@
     <div class="card" v-else>
       <!-- Initial State: Drop Zone -->
       <div 
-        v-if="!inputFile && state === 'idle'"
+        v-if="files.length === 0 && state === 'idle'"
         class="drop-zone"
         :class="{ 'drag-over': isDragOver }"
-        @click="selectFile"
+        @click="selectFiles"
         @dragover.prevent="isDragOver = true"
         @dragleave="isDragOver = false"
         @drop.prevent="handleDrop"
       >
         <span class="drop-zone-icon">📁</span>
         <p class="drop-zone-text">点击选择或拖放 MOV 文件</p>
-        <p class="drop-zone-hint">支持带透明通道的 MOV 视频文件</p>
+        <p class="drop-zone-hint">支持选择多个带透明通道的 MOV 视频文件</p>
       </div>
 
-      <!-- File Selected State -->
-      <div v-else-if="inputFile && state !== 'complete'">
-        <div class="file-info">
-          <span class="file-icon">🎥</span>
-          <div class="file-details">
-            <div class="file-name">{{ fileName }}</div>
-            <div class="file-meta" v-if="videoInfo">
-              {{ videoInfo.width }}×{{ videoInfo.height }} · {{ formatDuration(videoInfo.duration) }}
-            </div>
+      <!-- File List State -->
+      <div v-else-if="files.length > 0 && state !== 'complete'">
+        <!-- File List Header -->
+        <div class="file-list-header">
+          <span class="file-count">
+            <span class="file-count-icon">📂</span>
+            已选择 {{ files.length }} 个文件
+          </span>
+          <div class="file-list-actions">
+            <button class="btn-text" @click="selectFiles" :disabled="state === 'converting'">
+              <span>➕</span> 添加
+            </button>
+            <button class="btn-text danger" @click="clearAllFiles" :disabled="state === 'converting'">
+              <span>🗑️</span> 清空
+            </button>
           </div>
-          <button class="file-remove" @click="clearFile" title="移除文件">✕</button>
         </div>
 
-        <!-- Video Info Grid -->
-        <div class="video-info" v-if="videoInfo">
-          <div class="video-info-item">
-            <span class="video-info-label">编码格式</span>
-            <span class="video-info-value">{{ videoInfo.codec }}</span>
-          </div>
-          <div class="video-info-item">
-            <span class="video-info-label">像素格式</span>
-            <span class="video-info-value">{{ videoInfo.pixelFormat }}</span>
-          </div>
-          <div class="video-info-item">
-            <span class="video-info-label">帧率</span>
-            <span class="video-info-value">{{ formatFPS(videoInfo.fps) }}</span>
-          </div>
-          <div class="video-info-item">
-            <span class="video-info-label">透明通道</span>
-            <span :class="videoInfo.hasAlpha ? 'alpha-badge' : 'no-alpha-badge'">
-              {{ videoInfo.hasAlpha ? '✓ 有' : '✗ 无' }}
-            </span>
+        <!-- File List -->
+        <div class="file-list">
+          <div 
+            class="file-item" 
+            v-for="(file, index) in files" 
+            :key="file.path"
+            :class="{ 
+              'converting': currentFileIndex === index && state === 'converting',
+              'completed': file.status === 'completed',
+              'error': file.status === 'error'
+            }"
+          >
+            <div class="file-item-content">
+              <span class="file-status-icon">
+                <template v-if="file.status === 'completed'">✅</template>
+                <template v-else-if="file.status === 'error'">❌</template>
+                <template v-else-if="currentFileIndex === index && state === 'converting'">
+                  <span class="file-loader"></span>
+                </template>
+                <template v-else>🎥</template>
+              </span>
+              <div class="file-item-details">
+                <div class="file-item-name">{{ getFileName(file.path) }}</div>
+                <div class="file-item-meta" v-if="file.info">
+                  {{ file.info.width }}×{{ file.info.height }} · {{ formatDuration(file.info.duration) }}
+                  <span :class="file.info.hasAlpha ? 'alpha-badge-small' : 'no-alpha-badge-small'">
+                    {{ file.info.hasAlpha ? '透明' : '不透明' }}
+                  </span>
+                </div>
+                <div class="file-item-error" v-if="file.errorMessage">
+                  {{ file.errorMessage }}
+                </div>
+                <!-- Per-file progress bar -->
+                <div class="file-item-progress" v-if="currentFileIndex === index && state === 'converting'">
+                  <div class="progress-bar small">
+                    <div class="progress-fill" :style="{ width: currentProgress + '%' }"></div>
+                  </div>
+                  <span class="progress-text">{{ Math.round(currentProgress) }}%</span>
+                </div>
+              </div>
+              <button 
+                class="file-item-remove" 
+                @click="removeFile(index)" 
+                title="移除文件"
+                :disabled="state === 'converting'"
+              >✕</button>
+            </div>
           </div>
         </div>
 
@@ -93,6 +126,7 @@
                   v-model.number="quality"
                   :min="0"
                   :max="63"
+                  :disabled="state === 'converting'"
                 />
               </div>
               <span class="range-label low">低质量</span>
@@ -105,12 +139,12 @@
         <div class="button-group">
           <button 
             class="btn btn-primary btn-block"
-            @click="startConversion"
-            :disabled="state === 'converting'"
+            @click="startBatchConversion"
+            :disabled="state === 'converting' || files.length === 0"
             v-if="state !== 'converting'"
           >
             <span>🚀</span>
-            开始转换
+            开始批量转换 ({{ files.length }} 个文件)
           </button>
           <button 
             class="btn btn-danger btn-block"
@@ -122,18 +156,18 @@
           </button>
         </div>
 
-        <!-- Progress Bar -->
+        <!-- Overall Progress -->
         <div class="progress-container" v-if="state === 'converting'">
           <div class="progress-header">
-            <span class="progress-label">转换进度</span>
-            <span class="progress-percent">{{ Math.round(progress) }}%</span>
+            <span class="progress-label">总体进度</span>
+            <span class="progress-percent">{{ completedCount }} / {{ files.length }}</span>
           </div>
           <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: progress + '%' }"></div>
+            <div class="progress-fill overall" :style="{ width: overallProgress + '%' }"></div>
           </div>
         </div>
 
-        <!-- Error Message -->
+        <!-- Global Error Message -->
         <div class="status error" v-if="errorMessage" style="margin-top: 16px;">
           ⚠️ {{ errorMessage }}
         </div>
@@ -142,11 +176,16 @@
       <!-- Complete State -->
       <div v-else-if="state === 'complete'" class="result">
         <span class="result-icon success">✅</span>
-        <h2 class="result-title">转换完成!</h2>
-        <p class="result-path">{{ outputPath }}</p>
+        <h2 class="result-title">批量转换完成!</h2>
+        <div class="result-summary">
+          <p class="result-stats">
+            成功: <span class="success-count">{{ successCount }}</span> · 
+            失败: <span class="error-count">{{ errorCount }}</span>
+          </p>
+        </div>
         <div class="result-actions">
-          <button class="btn btn-success" @click="openInExplorer">
-            📂 打开文件位置
+          <button class="btn btn-success" @click="openOutputFolder" v-if="successCount > 0">
+            📂 打开输出目录
           </button>
           <button class="btn btn-primary" @click="resetAll">
             🔄 继续转换
@@ -169,15 +208,14 @@ export default {
   name: 'App',
   data() {
     return {
-      inputFile: '',
+      files: [], // { path, info, status, outputPath, errorMessage }
       outputFolder: '',
-      outputPath: '',
       quality: 25,
       state: 'idle', // idle, converting, complete
-      progress: 0,
+      currentProgress: 0,
+      currentFileIndex: -1,
       isDragOver: false,
       errorMessage: '',
-      videoInfo: null,
       // FFmpeg 状态
       ffmpegReady: false,
       ffmpegStatus: '',
@@ -186,14 +224,25 @@ export default {
     }
   },
   computed: {
-    fileName() {
-      if (!this.inputFile) return ''
-      return this.inputFile.split(/[/\\]/).pop()
-    },
     qualityClass() {
       if (this.quality <= 20) return 'quality-high'
       if (this.quality <= 35) return 'quality-medium'
       return 'quality-low'
+    },
+    completedCount() {
+      return this.files.filter(f => f.status === 'completed' || f.status === 'error').length
+    },
+    successCount() {
+      return this.files.filter(f => f.status === 'completed').length
+    },
+    errorCount() {
+      return this.files.filter(f => f.status === 'error').length
+    },
+    overallProgress() {
+      if (this.files.length === 0) return 0
+      const baseProgress = (this.completedCount / this.files.length) * 100
+      const currentFileProgress = (this.currentProgress / 100) / this.files.length * 100
+      return Math.min(baseProgress + currentFileProgress, 100)
     }
   },
   mounted() {
@@ -214,20 +263,25 @@ export default {
 
       // 转换状态事件
       window.runtime.EventsOn('conversion:progress', (progress) => {
-        this.progress = progress
+        this.currentProgress = progress
       })
       window.runtime.EventsOn('conversion:complete', (path) => {
-        this.outputPath = path
-        this.state = 'complete'
+        if (this.currentFileIndex >= 0 && this.currentFileIndex < this.files.length) {
+          this.files[this.currentFileIndex].status = 'completed'
+          this.files[this.currentFileIndex].outputPath = path
+        }
       })
       window.runtime.EventsOn('conversion:error', (error) => {
-        this.errorMessage = error
-        this.state = 'idle'
+        if (this.currentFileIndex >= 0 && this.currentFileIndex < this.files.length) {
+          this.files[this.currentFileIndex].status = 'error'
+          this.files[this.currentFileIndex].errorMessage = error
+        }
       })
       window.runtime.EventsOn('conversion:cancelled', () => {
         this.errorMessage = '转换已取消'
         this.state = 'idle'
-        this.progress = 0
+        this.currentProgress = 0
+        this.currentFileIndex = -1
       })
     }
 
@@ -247,13 +301,26 @@ export default {
       }
     },
 
-    async selectFile() {
+    async selectFiles() {
       try {
-        const file = await window.go.main.App.SelectInputFile()
-        if (file) {
-          this.inputFile = file
+        const selectedFiles = await window.go.main.App.SelectInputFiles()
+        if (selectedFiles && selectedFiles.length > 0) {
           this.errorMessage = ''
-          await this.loadVideoInfo()
+          // 添加新文件，避免重复
+          for (const filePath of selectedFiles) {
+            if (!this.files.find(f => f.path === filePath)) {
+              const fileObj = {
+                path: filePath,
+                info: null,
+                status: 'pending',
+                outputPath: '',
+                errorMessage: ''
+              }
+              this.files.push(fileObj)
+              // 异步加载视频信息
+              this.loadVideoInfo(fileObj)
+            }
+          }
         }
       } catch (error) {
         this.errorMessage = '选择文件失败: ' + error.message
@@ -263,78 +330,112 @@ export default {
     handleDrop(event) {
       this.isDragOver = false
       // Note: Wails handles file drops differently, using the select dialog
-      this.selectFile()
+      this.selectFiles()
     },
     
-    async loadVideoInfo() {
+    async loadVideoInfo(fileObj) {
       try {
-        const info = await window.go.main.App.GetVideoInfo(this.inputFile)
-        this.videoInfo = info
+        const info = await window.go.main.App.GetVideoInfo(fileObj.path)
+        fileObj.info = info
       } catch (error) {
         console.error('Failed to load video info:', error)
       }
     },
     
-    clearFile() {
-      this.inputFile = ''
-      this.videoInfo = null
+    getFileName(filePath) {
+      if (!filePath) return ''
+      return filePath.split(/[/\\]/).pop()
+    },
+
+    removeFile(index) {
+      if (this.state === 'converting') return
+      this.files.splice(index, 1)
+    },
+
+    clearAllFiles() {
+      if (this.state === 'converting') return
+      this.files = []
       this.errorMessage = ''
-      this.state = 'idle'
-      this.progress = 0
     },
     
-    async startConversion() {
-      if (!this.inputFile) {
-        this.errorMessage = '请先选择一个文件'
+    async startBatchConversion() {
+      if (this.files.length === 0) {
+        this.errorMessage = '请先选择文件'
         return
       }
       
       this.state = 'converting'
-      this.progress = 0
+      this.currentProgress = 0
+      this.currentFileIndex = 0
       this.errorMessage = ''
       
-      try {
-        const result = await window.go.main.App.ConvertToWebM(
-          this.inputFile, 
-          this.outputFolder, 
-          this.quality
-        )
+      // 重置所有文件状态
+      for (const file of this.files) {
+        file.status = 'pending'
+        file.errorMessage = ''
+      }
+      
+      // 依次转换每个文件
+      for (let i = 0; i < this.files.length; i++) {
+        if (this.state !== 'converting') break // 被取消
         
-        if (result.success) {
-          this.outputPath = result.outputPath
-          this.state = 'complete'
-        } else {
-          this.errorMessage = result.message
-          this.state = 'idle'
+        this.currentFileIndex = i
+        this.currentProgress = 0
+        
+        try {
+          const result = await window.go.main.App.ConvertToWebM(
+            this.files[i].path, 
+            this.outputFolder, 
+            this.quality
+          )
+          
+          if (result.success) {
+            this.files[i].status = 'completed'
+            this.files[i].outputPath = result.outputPath
+          } else {
+            this.files[i].status = 'error'
+            this.files[i].errorMessage = result.message
+          }
+        } catch (error) {
+          this.files[i].status = 'error'
+          this.files[i].errorMessage = '转换失败: ' + error.message
         }
-      } catch (error) {
-        this.errorMessage = '转换失败: ' + error.message
-        this.state = 'idle'
+      }
+      
+      if (this.state === 'converting') {
+        this.state = 'complete'
+        this.currentFileIndex = -1
       }
     },
     
     async cancelConversion() {
       try {
         await window.go.main.App.CancelConversion()
+        this.state = 'idle'
+        this.currentFileIndex = -1
+        this.currentProgress = 0
       } catch (error) {
         console.error('Failed to cancel conversion:', error)
       }
     },
     
-    async openInExplorer() {
-      try {
-        await window.go.main.App.OpenFileInExplorer(this.outputPath)
-      } catch (error) {
-        console.error('Failed to open explorer:', error)
+    async openOutputFolder() {
+      // 打开第一个成功转换的文件所在目录
+      const successFile = this.files.find(f => f.status === 'completed')
+      if (successFile && successFile.outputPath) {
+        try {
+          await window.go.main.App.OpenFileInExplorer(successFile.outputPath)
+        } catch (error) {
+          console.error('Failed to open explorer:', error)
+        }
       }
     },
     
     resetAll() {
-      this.inputFile = ''
-      this.outputPath = ''
-      this.videoInfo = null
+      this.files = []
       this.state = 'idle'
-      this.progress = 0
+      this.currentProgress = 0
+      this.currentFileIndex = -1
       this.errorMessage = ''
     },
     
@@ -344,17 +445,6 @@ export default {
       const mins = Math.floor(secs / 60)
       const remainingSecs = Math.floor(secs % 60)
       return `${mins}:${remainingSecs.toString().padStart(2, '0')}`
-    },
-    
-    formatFPS(fps) {
-      if (!fps) return '--'
-      // FPS is usually in format "30/1" or "30000/1001"
-      const parts = fps.split('/')
-      if (parts.length === 2) {
-        const result = parseFloat(parts[0]) / parseFloat(parts[1])
-        return result.toFixed(2) + ' fps'
-      }
-      return fps + ' fps'
     }
   }
 }
