@@ -70,7 +70,7 @@ jobs:
           retention-days: 30
 
   build-macos:
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -116,6 +116,9 @@ jobs:
           # Create a temporary directory for DMG contents
           mkdir -p dmg-contents
           cp -r "build/bin/ffmpeg-tools.app" dmg-contents/
+          
+          # Create symbolic link to Applications folder for drag-and-drop install
+          ln -s /Applications dmg-contents/Applications
           
           # Create DMG
           hdiutil create -volname "FFmpeg Tools" \
