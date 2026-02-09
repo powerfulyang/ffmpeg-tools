@@ -1,0 +1,180 @@
+name: Build Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: false
+        default: 'dev'
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.25.7'
+  NODE_VERSION: '22'
+  PNPM_VERSION: '10'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Cache Wails CLI
+        id: cache-wails
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/wails.exe
+          key: wails-windows-${{ hashFiles('go.mod') }}
+
+      - name: Install Wails CLI
+        if: steps.cache-wails.outputs.cache-hit != 'true'
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Windows executable
+        run: wails build -platform windows/amd64 -clean -o ffmpeg-tools.exe
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ffmpeg-tools-windows-amd64
+          path: build/bin/ffmpeg-tools.exe
+          retention-days: 30
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Cache Wails CLI
+        id: cache-wails
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/wails
+          key: wails-macos-${{ hashFiles('go.mod') }}
+
+      - name: Install Wails CLI
+        if: steps.cache-wails.outputs.cache-hit != 'true'
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build macOS Universal App
+        run: wails build -platform darwin/universal -clean -o ffmpeg-tools
+
+      - name: Create DMG
+        run: |
+          # Create a temporary directory for DMG contents
+          mkdir -p dmg-contents
+          cp -r "build/bin/ffmpeg-tools.app" dmg-contents/
+          
+          # Create DMG
+          hdiutil create -volname "FFmpeg Tools" \
+            -srcfolder dmg-contents \
+            -ov -format UDZO \
+            build/bin/ffmpeg-tools-universal.dmg
+
+      - name: Upload macOS App artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ffmpeg-tools-macos-universal-app
+          path: build/bin/ffmpeg-tools.app
+          retention-days: 30
+
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ffmpeg-tools-macos-universal-dmg
+          path: build/bin/ffmpeg-tools-universal.dmg
+          retention-days: 30
+
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: ffmpeg-tools-windows-amd64
+          path: artifacts/windows
+
+      - name: Download macOS DMG artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: ffmpeg-tools-macos-universal-dmg
+          path: artifacts/macos
+
+      - name: List artifacts
+        run: |
+          echo "Windows artifacts:"
+          ls -la artifacts/windows/
+          echo "macOS artifacts:"
+          ls -la artifacts/macos/
+
+      - name: Rename artifacts for release
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          mv artifacts/windows/ffmpeg-tools.exe "artifacts/ffmpeg-tools-${VERSION}-windows-amd64.exe"
+          mv artifacts/macos/ffmpeg-tools-universal.dmg "artifacts/ffmpeg-tools-${VERSION}-macos-universal.dmg"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/ffmpeg-tools-*.exe
+            artifacts/ffmpeg-tools-*.dmg
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

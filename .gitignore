@@ -1,0 +1,53 @@
+# --- Wails 编译产物 ---
+# 默认的二进制输出目录
+/build/bin/
+# 临时构建文件
+/build/windows/icon.ico
+/build/windows/info.json
+/build/darwin/icon.icns
+/build/darwin/info.plist
+
+# --- 前端依赖与构建 ---
+# 进入 frontend 目录下的 node_modules
+**/node_modules/
+# 前端打包后的静态资源（Wails 会将其嵌入 Go）
+/frontend/dist/
+/frontend/wailsjs/
+# 前端环境配置文件
+/frontend/.env.local
+/frontend/.env.*.local
+# 前端日志
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Go 后端相关 ---
+# 编译后的二进制文件 (防止手动 go build 产生的文件漏掉)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+# 依赖目录 (如果你使用了 go mod vendor)
+/vendor/
+
+# --- IDE 与系统文件 ---
+# Windows 缩略图
+Thumbs.db
+# macOS 系统文件
+.DS_Store
+# JetBrains (GoLand/WebStorm)
+.idea/
+# VS Code
+.vscode/
+# 如果你不想提交 VS Code 的本地设置，可以保留下面这行
+# !.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --- 调试与日志 ---
+/wails.log
+/debug.log
