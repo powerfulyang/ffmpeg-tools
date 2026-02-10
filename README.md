@@ -1,115 +1,90 @@
-# ES Tools - MOV to WebM 转换器
+# FFmpeg Tools - MOV to WebM 转换器
 
-一个使用 Wails 构建的桌面应用，用于将 MOV 视频转换成 VP9 编码带透明通道的 WebM 文件。
+一个基于 Wails v2 和 Vue 3 开发的桌面应用程序，专门用于将 MOV 视频转换为支持透明通道的 VP9 编码 WebM 格式。
 
-## 功能特性
+## ✨ 功能特性
 
-- 🎬 将 MOV 视频转换为 VP9 编码的 WebM 格式
-- 🔮 保留透明通道（Alpha Channel）
-- 📊 实时显示转换进度
-- 🎛️ 可调节输出质量（CRF 值）
-- 📁 自动检测视频信息（分辨率、编码、帧率等）
+- **高效转换**: 将 MOV 视频转换为 VP9 编码的 WebM 格式。
+- **透明通道**: 完美保留视频的 Alpha 通道（透明背景）。
+- **智能探测**: 自动识别视频分辨率、帧率、编码及透明度信息。
+- **进度实时化**: 转换过程中实时反馈百分比进度。
+- **参数调优**: 支持自定义 CRF (0-63) 质量参数。
+- **零配置环境**: 应用启动时会自动检查并从 CDN 下载对应平台的 FFmpeg 二进制文件。
 
-## 技术栈
+## 🛠️ 技术栈
 
-- **后端**: Go + Wails v2
-- **前端**: Vue 3 + Vite
-- **视频处理**: FFmpeg
+- **后端**: [Go](https://go.dev/) + [Wails v2](https://wails.io/)
+- **前端**: [Vue 3](https://vuejs.org/) + [Vite](https://vitejs.dev/)
+- **核心引擎**: [FFmpeg](https://ffmpeg.org/) (通过 `ffmpeg-static` 自动分发)
 
-## 项目结构
+## 📁 项目结构
 
-```
-es-tools/
-├── main.go                     # Wails 应用入口
-├── app.go                      # 应用逻辑层
-├── wails.json                  # Wails 配置
-├── go.mod                      # Go 模块
+```text
+ffmpeg-tools/
+├── main.go            # Wails 应用入口
+├── app.go             # 核心业务逻辑 (绑定到前端)
 ├── internal/
-│   └── ffmpeg/
-│       └── converter.go        # FFmpeg 封装
-├── frontend/
-│   ├── package.json
-│   ├── vite.config.js
-│   ├── index.html
-│   └── src/
-│       ├── main.js
-│       ├── style.css
-│       └── App.vue
-└── resources/
-    └── ffmpeg/                 # FFmpeg 二进制文件
-        ├── ffmpeg.exe
-        └── ffprobe.exe
+│   └── ffmpeg/        # FFmpeg 封装层 (转换与下载逻辑)
+├── frontend/          # Vue 3 前端源码
+└── ~/.ffmpeg-tools/   # FFmpeg 二进制文件存放路径 (跨应用共享)
 ```
 
-## 开发环境设置
+## 🚀 快速开始
 
 ### 前提条件
 
-- Go 1.21+
-- Node.js 18+
-- Wails CLI v2
-
-### 安装 Wails CLI
-
-```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-```
-
-### 添加 FFmpeg
-
-运行 Go 下载脚本自动下载各平台的 FFmpeg：
-
-```bash
-go run scripts/download_ffmpeg.go
-```
-
-FFmpeg 二进制文件将保存到对应平台目录：
-- `resources/ffmpeg/windows-amd64/`
-- `resources/ffmpeg/darwin-amd64/`
-- `resources/ffmpeg/darwin-arm64/`
+- [Go](https://go.dev/dl/) 1.21+
+- [Node.js](https://nodejs.org/) 18+
+- [Wails CLI](https://wails.io/docs/gettingstarted/installation)
 
 ### 开发模式
 
+1. 安装依赖：
+   ```bash
+   cd frontend && pnpm install
+   ```
+
+2. 运行开发服务器：
+   ```bash
+   wails dev
+   ```
+
+### 生产构建
+
 ```bash
-# 方式1: 使用 Wails CLI（推荐，如果已安装）
-wails dev
-
-# 方式2: 手动运行
-cd frontend && pnpm run dev  # 终端1
-go build -tags dev -gcflags "all=-N -l" && ./es-tools.exe  # 终端2
-```
-
-### 构建生产版本
-
-```bash
-# 方式1: 使用 Wails CLI
+# 构建对应的操作系统版本
 wails build
-
-# 方式2: 手动构建
-cd frontend && pnpm run build
-go build -tags desktop,production -ldflags "-w -s -H windowsgui" -o build/bin/es-tools.exe .
-
-# 方式3: 使用构建脚本
-.\scripts\build.ps1
 ```
 
-生成的可执行文件位于 `build/bin/` 目录。
+生成的可执行文件将位于 `build/bin/` 目录下。
 
-## FFmpeg 转换参数说明
+## 📦 FFmpeg 运行时
 
-转换使用以下 FFmpeg 参数：
+本程序不需要用户手动安装 FFmpeg。在首次运行或找不到环境时，它会自动下载二进制文件到以下目录：
+- **Windows/macOS**: `~/.ffmpeg-tools/`
+
+程序会自动检测：
+1. 系统环境变量中的 `ffmpeg`。
+2. `~/.ffmpeg-tools/` 目录中的文件。
+
+## 🎞️ 转换参数参考
+
+应用内部使用的核心 FFmpeg 指令如下：
 
 ```bash
 ffmpeg -i input.mov \
-  -c:v libvpx-vp9 \      # 使用 VP9 编码
-  -pix_fmt yuva420p \    # 支持透明通道的像素格式
-  -crf <quality> \       # 质量参数 (0-63，越低越好)
-  -b:v 0 \               # 使用 CRF 模式
-  -auto-alt-ref 0 \      # Alpha 通道所需
-  -an \                  # 无音频
+  -c:v libvpx-vp9 \
+  -vf "premultiply=inplace=1" \
+  -pix_fmt yuva420p \
+  -color_range pc \
+  -crf 30 \
+  -b:v 0 \
+  -auto-alt-ref 0 \
+  -metadata:s:v:0 alpha_mode=1 \
+  -an \
   output.webm
 ```
 
-## 许可证
+## 📄 许可证
 
-MIT License
+[MIT License](LICENSE)

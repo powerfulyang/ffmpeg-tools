@@ -30,10 +30,6 @@ func NewConverter() *Converter {
 	return c
 }
 
-// getPlatformDir returns the platform-specific directory name
-func getPlatformDir() string {
-	return runtime.GOOS + "-" + runtime.GOARCH
-}
 
 // initPaths initializes the paths to FFmpeg binaries
 func (c *Converter) initPaths() {
@@ -56,42 +52,18 @@ func (c *Converter) initPaths() {
 		return
 	}
 
-	// Get the executable directory
-	execPath, err := os.Executable()
-	if err != nil {
-		// Fallback to current directory
-		execPath = "."
-	}
-	execDir := filepath.Dir(execPath)
-
-	// Platform-specific directory (e.g., windows-amd64, darwin-arm64)
-	platformDir := getPlatformDir()
-
-	// 2. Check in resources/ffmpeg/<platform> directory (development)
-	devPath := filepath.Join(execDir, "resources", "ffmpeg", platformDir, ffmpegBin)
-	if _, err := os.Stat(devPath); err == nil {
-		c.ffmpegPath = devPath
-		c.ffprobePath = filepath.Join(execDir, "resources", "ffmpeg", platformDir, ffprobeBin)
-		return
+	// 2. 检查 ~/.ffmpeg-tools 目录
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		toolsDir := filepath.Join(homeDir, ".ffmpeg-tools")
+		ffmpegPath := filepath.Join(toolsDir, ffmpegBin)
+		if _, err := os.Stat(ffmpegPath); err == nil {
+			c.ffmpegPath = ffmpegPath
+			c.ffprobePath = filepath.Join(toolsDir, ffprobeBin)
+			return
+		}
 	}
 
-	// 3. Check in resources/ffmpeg directory without platform (fallback for development)
-	devFallback := filepath.Join(execDir, "resources", "ffmpeg", ffmpegBin)
-	if _, err := os.Stat(devFallback); err == nil {
-		c.ffmpegPath = devFallback
-		c.ffprobePath = filepath.Join(execDir, "resources", "ffmpeg", ffprobeBin)
-		return
-	}
-
-	// 4. Check in same directory as executable (production build)
-	prodPath := filepath.Join(execDir, ffmpegBin)
-	if _, err := os.Stat(prodPath); err == nil {
-		c.ffmpegPath = prodPath
-		c.ffprobePath = filepath.Join(execDir, ffprobeBin)
-		return
-	}
-
-	// 5. Fallback: 需要从 npm mirror 下载
+	// 3. Fallback: 需要从 npm mirror 下载
 	c.ffmpegPath = ffmpegBin
 	c.ffprobePath = ffprobeBin
 }

@@ -77,16 +77,12 @@ func EnsureFFmpeg(progressCallback func(status string, progress float64)) error 
 		return err
 	}
 
-	// 获取目标目录
-	execPath, err := os.Executable()
+	// 获取目标目录 (~/.ffmpeg-tools)
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		execPath = "."
+		return fmt.Errorf("获取用户目录失败: %w", err)
 	}
-	execDir := filepath.Dir(execPath)
-
-	// 使用平台特定目录
-	platform := runtime.GOOS + "-" + runtime.GOARCH
-	targetDir := filepath.Join(execDir, "resources", "ffmpeg", platform)
+	targetDir := filepath.Join(homeDir, ".ffmpeg-tools")
 
 	// 创建目录
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
