@@ -1,8 +1,8 @@
 <template>
   <div class="container">
     <header class="header">
-      <h1>🎬 MOV to WebM 转换器</h1>
-      <p>将 MOV 视频转换为 VP9 编码带透明通道的 WebM 格式</p>
+      <h1>🎬 FFmpeg 视频工具</h1>
+      <p>PPT 视频压缩与 MOV 转 WebM</p>
     </header>
 
     <!-- FFmpeg 初始化状态 -->
@@ -23,21 +23,42 @@
       </div>
     </div>
 
-    <div class="card" v-else>
-      <!-- Initial State: Drop Zone -->
-      <div 
-        v-if="files.length === 0 && state === 'idle'"
-        class="drop-zone"
-        :class="{ 'drag-over': isDragOver }"
-        @click="selectFiles"
-        @dragover.prevent="isDragOver = true"
-        @dragleave="isDragOver = false"
-        @drop.prevent="handleDrop"
-      >
-        <span class="drop-zone-icon">📁</span>
-        <p class="drop-zone-text">点击选择或拖放 MOV 文件</p>
-        <p class="drop-zone-hint">支持选择多个带透明通道的 MOV 视频文件</p>
+    <div v-else>
+      <!-- 功能切换 Tab -->
+      <div class="card tab-bar">
+        <button
+          class="tab-btn"
+          :class="{ active: activeTab === 'mov2webm' }"
+          @click="activeTab = 'mov2webm'"
+        >
+          🔄 MOV 转 WebM
+        </button>
+        <button
+          class="tab-btn"
+          :class="{ active: activeTab === 'ppt' }"
+          @click="activeTab = 'ppt'"
+        >
+          📊 PPT 视频压缩
+        </button>
       </div>
+
+      <!-- MOV to WebM 功能 -->
+      <template v-if="activeTab === 'mov2webm'">
+        <div class="card">
+          <!-- Initial State: Drop Zone -->
+          <div
+            v-if="files.length === 0 && state === 'idle'"
+            class="drop-zone"
+            :class="{ 'drag-over': isDragOver }"
+            @click="selectFiles"
+            @dragover.prevent="isDragOver = true"
+            @dragleave="isDragOver = false"
+            @drop.prevent="handleDrop"
+          >
+            <span class="drop-zone-icon">📁</span>
+            <p class="drop-zone-text">点击选择或拖放 MOV 文件</p>
+            <p class="drop-zone-hint">支持选择多个带透明通道的 MOV 视频文件</p>
+          </div>
 
       <!-- File List State -->
       <div v-else-if="files.length > 0 && state !== 'complete'">
@@ -140,7 +161,7 @@
           <button 
             class="btn btn-primary btn-block"
             @click="startBatchConversion"
-            :disabled="state === 'converting' || files.length === 0"
+            :disabled="files.length === 0"
             v-if="state !== 'converting'"
           >
             <span>🚀</span>
@@ -192,30 +213,209 @@
           </button>
         </div>
       </div>
-    </div>
+        <!-- End tag for <div class="card"> -> -->
+        </div>
 
-    <!-- Tips -->
-    <div class="card" style="padding: 20px;">
-      <p style="color: var(--text-secondary); font-size: 0.9rem; text-align: center;">
-        💡 提示: 输出文件将保存在源文件同目录下，文件名后缀为 <code>.webm</code>
-      </p>
+        <!-- Tips -->
+        <div class="card" style="padding: 20px;">
+          <p style="color: var(--text-secondary); font-size: 0.9rem; text-align: center;">
+            💡 提示: 输出文件将保存在源文件同目录下，文件名后缀为 <code>.webm</code>
+          </p>
+        </div>
+      </template>
+
+      <!-- PPT 压缩功能 -->
+      <template v-if="activeTab === 'ppt'">
+        <div class="card">
+          <!-- PPT 文件选择 -->
+          <div v-if="pptFiles.length === 0 && pptState === 'idle'" class="drop-zone" @click="selectPPTFiles">
+            <span class="drop-zone-icon">📊</span>
+            <p class="drop-zone-text">点击选择 PPT 文件</p>
+            <p class="drop-zone-hint">支持 .pptx 格式，支持多选，自动识别母版视频</p>
+          </div>
+
+          <!-- PPT 列表状态 -->
+          <div v-else-if="pptFiles.length > 0 && pptState !== 'complete'">
+            <div class="file-list-header">
+              <span class="file-count">
+                <span class="file-count-icon">📂</span>
+                已选择 {{ pptFiles.length }} 个 PPT 文件
+              </span>
+              <div class="flex gap-2">
+                <button class="btn-text" @click="selectPPTFiles" :disabled="pptState !== 'idle'">
+                  <span>➕</span> 添加
+                </button>
+                <button class="btn-text danger" @click="resetPPT" :disabled="pptState !== 'idle'">
+                  <span>🗑️</span> 清空
+                </button>
+              </div>
+            </div>
+
+            <div class="file-list mb-4">
+              <div 
+                v-for="(ppt, index) in pptFiles" 
+                :key="ppt.path"
+                class="file-item"
+                :class="{ 
+                  'converting': pptCurrentFileIndex === index && pptState !== 'idle',
+                  'completed': ppt.status === 'completed',
+                  'error': ppt.status === 'error'
+                }"
+              >
+                <div class="file-item-content">
+                  <span class="file-status-icon">
+                    <template v-if="ppt.status === 'completed'">✅</template>
+                    <template v-else-if="ppt.status === 'error'">❌</template>
+                    <template v-else-if="pptCurrentFileIndex === index && pptState !== 'idle'">
+                      <span class="file-loader"></span>
+                    </template>
+                    <template v-else>📊</template>
+                  </span>
+                  <div class="file-item-details">
+                    <div class="file-item-name">{{ getFileName(ppt.path) }}</div>
+                    <div class="file-item-meta" v-if="ppt.status === 'completed'">
+                      已压缩 · 节省 {{ formatFileSize(ppt.saved) }}
+                    </div>
+                    <div class="file-item-error" v-if="ppt.errorMessage">
+                      {{ ppt.errorMessage }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 质量与筛选设置 -->
+            <div class="settings" v-if="pptState === 'idle'">
+              <div class="flex items-center justify-between mb-4 px-2">
+                <label class="flex items-center cursor-pointer select-none">
+                  <input type="checkbox" v-model="pptOnlyMaster" class="mr-2 w-4 h-4">
+                  <span class="text-sm font-medium">仅压缩母版中的视频</span>
+                </label>
+                <span class="text-xs text-gray-400">💡 母版视频通常出现在所有幻灯片背景中</span>
+              </div>
+
+              <div class="settings-row">
+                <div>
+                  <span class="settings-label">压缩质量 (CRF)</span>
+                  <div class="settings-hint">推荐: 25-30</div>
+                </div>
+                <div class="range-wrapper">
+                  <span class="range-label high">高质量</span>
+                  <div class="range-container">
+                    <input
+                      type="range"
+                      class="range-slider"
+                      v-model.number="pptQuality"
+                      :min="0"
+                      :max="51"
+                      :disabled="pptState !== 'idle'"
+                    />
+                  </div>
+                  <span class="range-label low">低质量</span>
+                </div>
+                <span class="range-value" :class="pptQualityClass">{{ pptQuality }}</span>
+              </div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="button-group mt-4">
+              <button
+                v-if="pptState === 'idle'"
+                class="btn btn-primary btn-block"
+                @click="startBatchPPTCompression"
+                :disabled="pptFiles.length === 0"
+              >
+                <span>🚀</span>
+                开始批量处理 ({{ pptFiles.length }} 个文件)
+              </button>
+              <button 
+                v-else
+                class="btn btn-danger btn-block"
+                @click="cancelPPTCompression"
+              >
+                <span class="loader"></span>
+                取消压缩
+              </button>
+            </div>
+
+            <!-- 总体进度 -->
+            <div class="progress-container mt-4" v-if="pptState !== 'idle'">
+              <div class="progress-header">
+                <span class="progress-label">
+                  {{ pptState === 'extracting' ? '正在提取...' : (pptState === 'repackaging' ? '正在打包...' : '正在压缩...') }}
+                </span>
+                <span class="progress-percent">{{ Math.round(pptOverallProgress) }}%</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill overall" :style="{ width: pptOverallProgress + '%' }"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PPT 完成状态 -->
+          <div v-else-if="pptState === 'complete'" class="result">
+            <span class="result-icon success">✅</span>
+            <h2 class="result-title">PPT 批量压缩完成!</h2>
+            <div class="result-summary">
+              <p class="result-stats">
+                已处理: {{ pptFiles.length }} 个文件<br>
+                总节省空间: {{ formatFileSize(pptTotalSaved) }}
+              </p>
+            </div>
+            <div class="result-actions">
+              <button class="btn btn-primary" @click="resetPPT">
+                🔄 继续压缩
+              </button>
+            </div>
+          </div>
+
+          <!-- 错误状态 -->
+          <div v-if="pptErrorMessage" class="status error" style="margin-top: 16px;">
+            ⚠️ {{ pptErrorMessage }}
+          </div>
+        </div>
+
+        <!-- Tips -->
+        <div class="card" style="padding: 20px;">
+          <p style="color: var(--text-secondary); font-size: 0.9rem; text-align: center;">
+            💡 提示: 压缩后的 PPT 文件会保存在原文件同目录下，文件名后缀为 <code>_compressed.pptx</code>
+          </p>
+        </div>
+      </template>
     </div>
   </div>
 </template>
 
-<script>
-export default {
+<script lang="ts">
+import { defineComponent } from 'vue'
+
+export default defineComponent({
   name: 'App',
   data() {
     return {
-      files: [], // { path, info, status, outputPath, errorMessage }
+      // Tab 切换
+      activeTab: 'mov2webm', // 'mov2webm' 或 'ppt'
+
+      // MOV 转 WebM 数据
+      files: [] as any[], // { path, info, status, outputPath, errorMessage }
       outputFolder: '',
       quality: 25,
-      state: 'idle', // idle, converting, complete
+      state: 'idle' as 'idle' | 'converting' | 'complete', // idle, converting, complete
       currentProgress: 0,
       currentFileIndex: -1,
       isDragOver: false,
       errorMessage: '',
+
+      // PPT 压缩数据
+      pptFiles: [] as any[], // { path, status, saved, errorMessage }
+      pptOnlyMaster: true,
+      pptQuality: 30,
+      pptState: 'idle' as 'idle' | 'extracting' | 'compressing' | 'repackaging' | 'complete',
+      pptCurrentFileIndex: -1,
+      pptOverallProgress: 0,
+      pptTotalSaved: 0,
+      pptErrorMessage: '',
+
       // FFmpeg 状态
       ffmpegReady: false,
       ffmpegStatus: '',
@@ -227,6 +427,11 @@ export default {
     qualityClass() {
       if (this.quality <= 20) return 'quality-high'
       if (this.quality <= 35) return 'quality-medium'
+      return 'quality-low'
+    },
+    pptQualityClass() {
+      if (this.pptQuality <= 20) return 'quality-high'
+      if (this.pptQuality <= 35) return 'quality-medium'
       return 'quality-low'
     },
     completedCount() {
@@ -247,41 +452,54 @@ export default {
   },
   mounted() {
     // Listen for events from Go backend
-    if (window.runtime) {
+    const runtime = (window as any).runtime
+    if (runtime) {
       // FFmpeg 状态事件
-      window.runtime.EventsOn('ffmpeg:progress', (data) => {
+      runtime.EventsOn('ffmpeg:progress', (data: any) => {
         this.ffmpegStatus = data.status
         this.ffmpegProgress = data.progress
       })
-      window.runtime.EventsOn('ffmpeg:ready', () => {
+      runtime.EventsOn('ffmpeg:ready', () => {
         this.ffmpegReady = true
         this.ffmpegStatus = 'FFmpeg 已就绪'
       })
-      window.runtime.EventsOn('ffmpeg:error', (error) => {
+      runtime.EventsOn('ffmpeg:error', (error: any) => {
         this.ffmpegError = error
       })
 
       // 转换状态事件
-      window.runtime.EventsOn('conversion:progress', (progress) => {
+      runtime.EventsOn('conversion:progress', (progress: any) => {
         this.currentProgress = progress
       })
-      window.runtime.EventsOn('conversion:complete', (path) => {
+      runtime.EventsOn('conversion:complete', (path: any) => {
         if (this.currentFileIndex >= 0 && this.currentFileIndex < this.files.length) {
           this.files[this.currentFileIndex].status = 'completed'
           this.files[this.currentFileIndex].outputPath = path
         }
       })
-      window.runtime.EventsOn('conversion:error', (error) => {
+      runtime.EventsOn('conversion:error', (error: any) => {
         if (this.currentFileIndex >= 0 && this.currentFileIndex < this.files.length) {
           this.files[this.currentFileIndex].status = 'error'
           this.files[this.currentFileIndex].errorMessage = error
         }
       })
-      window.runtime.EventsOn('conversion:cancelled', () => {
+      runtime.EventsOn('conversion:cancelled', () => {
         this.errorMessage = '转换已取消'
         this.state = 'idle'
         this.currentProgress = 0
         this.currentFileIndex = -1
+      })
+
+      // PPT 压缩事件
+      runtime.EventsOn('ppt:progress', (data: any) => {
+        this.pptOverallProgress = data.overallProgress
+      })
+      runtime.EventsOn('ppt:status', (status: any) => {
+        this.pptState = status
+      })
+      runtime.EventsOn('ppt:cancelled', () => {
+        this.pptErrorMessage = '压缩已取消'
+        this.pptState = 'idle'
       })
     }
 
@@ -291,7 +509,7 @@ export default {
   methods: {
     async checkFFmpegStatus() {
       try {
-        const status = await window.go.main.App.CheckFFmpegStatus()
+        const status = await (window as any).go.main.App.CheckFFmpegStatus()
         if (status && status.installed) {
           this.ffmpegReady = true
           this.ffmpegStatus = 'FFmpeg 已就绪'
@@ -303,7 +521,7 @@ export default {
 
     async selectFiles() {
       try {
-        const selectedFiles = await window.go.main.App.SelectInputFiles()
+        const selectedFiles = await (window as any).go.main.App.SelectInputFiles()
         if (selectedFiles && selectedFiles.length > 0) {
           this.errorMessage = ''
           // 添加新文件，避免重复
@@ -322,32 +540,32 @@ export default {
             }
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         this.errorMessage = '选择文件失败: ' + error.message
       }
     },
     
-    handleDrop(event) {
+    handleDrop(_event: any) {
       this.isDragOver = false
       // Note: Wails handles file drops differently, using the select dialog
       this.selectFiles()
     },
     
-    async loadVideoInfo(fileObj) {
+    async loadVideoInfo(fileObj: any) {
       try {
-        const info = await window.go.main.App.GetVideoInfo(fileObj.path)
+        const info = await (window as any).go.main.App.GetVideoInfo(fileObj.path)
         fileObj.info = info
-      } catch (error) {
+      } catch (error: any) {
         console.error('Failed to load video info:', error)
       }
     },
     
-    getFileName(filePath) {
+    getFileName(filePath: any) {
       if (!filePath) return ''
       return filePath.split(/[/\\]/).pop()
     },
 
-    removeFile(index) {
+    removeFile(index: any) {
       if (this.state === 'converting') return
       this.files.splice(index, 1)
     },
@@ -383,7 +601,7 @@ export default {
         this.currentProgress = 0
         
         try {
-          const result = await window.go.main.App.ConvertToWebM(
+          const result = await (window as any).go.main.App.ConvertToWebM(
             this.files[i].path, 
             this.outputFolder, 
             this.quality
@@ -396,7 +614,7 @@ export default {
             this.files[i].status = 'error'
             this.files[i].errorMessage = result.message
           }
-        } catch (error) {
+        } catch (error: any) {
           this.files[i].status = 'error'
           this.files[i].errorMessage = '转换失败: ' + error.message
         }
@@ -410,7 +628,7 @@ export default {
     
     async cancelConversion() {
       try {
-        await window.go.main.App.CancelConversion()
+        await (window as any).go.main.App.CancelConversion()
         this.state = 'idle'
         this.currentFileIndex = -1
         this.currentProgress = 0
@@ -424,8 +642,18 @@ export default {
       const successFile = this.files.find(f => f.status === 'completed')
       if (successFile && successFile.outputPath) {
         try {
-          await window.go.main.App.OpenFileInExplorer(successFile.outputPath)
-        } catch (error) {
+          await (window as any).go.main.App.OpenFileInExplorer(successFile.outputPath)
+        } catch (error: any) {
+          console.error('Failed to open explorer:', error)
+        }
+      }
+    },
+
+    async openFileInExplorer(path: string) {
+      if (path) {
+        try {
+          await (window as any).go.main.App.OpenFileInExplorer(path)
+        } catch (error: any) {
           console.error('Failed to open explorer:', error)
         }
       }
@@ -439,13 +667,157 @@ export default {
       this.errorMessage = ''
     },
     
-    formatDuration(seconds) {
+    formatDuration(seconds: any) {
       if (!seconds) return '--'
       const secs = parseFloat(seconds)
       const mins = Math.floor(secs / 60)
       const remainingSecs = Math.floor(secs % 60)
       return `${mins}:${remainingSecs.toString().padStart(2, '0')}`
+    },
+
+    // ========== PPT 压缩方法 ==========
+    async selectPPTFiles() {
+      try {
+        const selectedFiles = await (window as any).go.main.App.SelectPPTFiles()
+        if (selectedFiles && selectedFiles.length > 0) {
+          this.pptErrorMessage = ''
+          for (const filePath of selectedFiles) {
+            if (!this.pptFiles.find(f => f.path === filePath)) {
+              this.pptFiles.push({
+                path: filePath,
+                status: 'pending',
+                saved: 0,
+                errorMessage: ''
+              })
+            }
+          }
+        }
+      } catch (error: any) {
+        this.pptErrorMessage = '选择文件失败: ' + error.message
+      }
+    },
+
+    async startBatchPPTCompression() {
+      if (this.pptFiles.length === 0) {
+        this.pptErrorMessage = '请先选择 PPT 文件'
+        return
+      }
+
+      this.pptState = 'extracting'
+      this.pptErrorMessage = ''
+      this.pptTotalSaved = 0
+
+      for (let i = 0; i < this.pptFiles.length; i++) {
+        if ((this.pptState as any) === 'idle') break // 取消
+
+        this.pptCurrentFileIndex = i
+        this.pptOverallProgress = (i / this.pptFiles.length) * 100
+
+        try {
+          const result = await (window as any).go.main.App.ProcessPPTFile(
+            this.pptFiles[i].path,
+            this.pptQuality,
+            this.pptOnlyMaster
+          )
+
+          if (result.success) {
+            this.pptFiles[i].status = 'completed'
+            this.pptFiles[i].saved = result.totalSaved
+            this.pptTotalSaved += result.totalSaved
+          } else {
+            this.pptFiles[i].status = 'error'
+            this.pptFiles[i].errorMessage = result.message
+          }
+        } catch (error: any) {
+          this.pptFiles[i].status = 'error'
+          this.pptFiles[i].errorMessage = error.message
+        }
+      }
+
+      if ((this.pptState as any) !== 'idle') {
+        this.pptState = 'complete'
+        this.pptCurrentFileIndex = -1
+      }
+    },
+
+    async cancelPPTCompression() {
+      try {
+        await (window as any).go.main.App.CancelPPTCompression()
+        this.pptState = 'idle'
+        this.pptErrorMessage = '处理已取消'
+      } catch (error: any) {
+        console.error('Failed to cancel compression:', error)
+      }
+    },
+
+    resetPPT() {
+      this.pptFiles = []
+      this.pptState = 'idle'
+      this.pptCurrentFileIndex = -1
+      this.pptOverallProgress = 0
+      this.pptTotalSaved = 0
+      this.pptErrorMessage = ''
+    },
+
+    getFileNameWithoutExt(filePath: any) {
+      if (!filePath) return ''
+      const name = filePath.split(/[/\\]/).pop()
+      return name.replace(/\.[^/.]+$/, '')
+    },
+
+    formatFileSize(bytes: any) {
+      if (!bytes) return '0 B'
+      const units = ['B', 'KB', 'MB', 'GB', 'TB']
+      let size = bytes
+      let unitIndex = 0
+      while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024
+        unitIndex++
+      }
+      return size.toFixed(2) + ' ' + units[unitIndex]
     }
   }
-}
+})
 </script>
+
+<style scoped>
+/* Tab Bar Styles */
+.tab-bar {
+  display: flex;
+  padding: 0;
+  gap: 0;
+  margin-bottom: 20px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 12px 24px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  color: #00d4aa;
+  background: rgba(0, 212, 170, 0.1);
+}
+
+.tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #00d4aa;
+}
+</style>

@@ -12,7 +12,14 @@
     "vue": "^3.5.27"
   },
   "devDependencies": {
+    "@tsconfig/node18": "^18.2.6",
+    "@types/node": "^25.5.0",
+    "@unocss/reset": "^66.6.6",
+    "@unocss/vite": "^66.6.6",
     "@vitejs/plugin-vue": "^6.0.4",
-    "vite": "^7.3.1"
+    "typescript": "^5.9.3",
+    "unocss": "^66.6.6",
+    "vite": "^7.3.1",
+    "vue-tsc": "^3.2.5"
   }
 }

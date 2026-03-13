@@ -17,8 +17,9 @@ import (
 
 // App struct
 type App struct {
-	ctx       context.Context
-	converter *ffmpeg.Converter
+	ctx           context.Context
+	converter     *ffmpeg.Converter
+	pptCompressor *ffmpeg.PPTCompressor
 }
 
 // NewApp creates a new App application struct
@@ -199,3 +200,140 @@ func (a *App) CancelConversion() {
 	}
 }
 
+// ========== PPT 视频压缩功能 ==========
+
+// PPTCompressResult 表示 PPT 压缩结果
+type PPTCompressResult struct {
+	Success    bool                   `json:"success"`
+	Message    string                 `json:"message"`
+	OutputPath string                 `json:"outputPath"`
+	Videos     []*ffmpeg.PPTVideoInfo `json:"videos,omitempty"`
+	TotalSaved int64                  `json:"totalSaved,omitempty"`
+}
+
+// SelectPPTFiles 选择多个 PPT 文件
+func (a *App) SelectPPTFiles() ([]string, error) {
+	files, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择 PPT 文件（可多选）",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "PPT 文件",
+				Pattern:     "*.pptx;*.ppt",
+			},
+			{
+				DisplayName: "所有文件",
+				Pattern:     "*.*",
+			},
+		},
+	})
+	return files, err
+}
+
+// ProcessPPTFile 一键处理单个 PPT：提取、压缩、重新打包
+func (a *App) ProcessPPTFile(pptPath string, quality int, onlyMaster bool) PPTCompressResult {
+	if pptPath == "" {
+		return PPTCompressResult{Success: false, Message: "请选择 PPT 文件"}
+	}
+
+	if _, err := os.Stat(pptPath); os.IsNotExist(err) {
+		return PPTCompressResult{Success: false, Message: "PPT 文件不存在"}
+	}
+
+	compressor := ffmpeg.NewPPTCompressor()
+	a.pptCompressor = compressor
+
+	runtime.EventsEmit(a.ctx, "ppt:status", "extracting")
+
+	// 1. 提取视频并识别母版
+	videos, _, err := compressor.ExtractVideosFromPPT(pptPath)
+	if err != nil {
+		a.pptCompressor.Cleanup()
+		a.pptCompressor = nil
+		return PPTCompressResult{Success: false, Message: fmt.Sprintf("提取视频失败: %v", err)}
+	}
+
+	// 2. 筛选需要压缩的视频
+	var videosToCompress []*ffmpeg.PPTVideoInfo
+	for _, v := range videos {
+		if onlyMaster && !v.IsMaster {
+			continue // 跳过非母版视频
+		}
+		videosToCompress = append(videosToCompress, v)
+	}
+
+	if len(videosToCompress) == 0 {
+		a.pptCompressor.Cleanup()
+		a.pptCompressor = nil
+		return PPTCompressResult{
+			Success:    true,
+			Message:    "没有符合条件的视频需要压缩",
+			OutputPath: pptPath, // 未改变
+			Videos:     videos,
+			TotalSaved: 0,
+		}
+	}
+
+	// 3. 压缩视频
+	compressor.SetProgressCallback(func(current, total int, currentProgress float64) {
+		runtime.EventsEmit(a.ctx, "ppt:progress", map[string]interface{}{
+			"current":         current,
+			"total":           total,
+			"currentProgress": currentProgress,
+			"overallProgress": (float64(current-1) + currentProgress/100) / float64(total) * 100,
+		})
+	})
+
+	runtime.EventsEmit(a.ctx, "ppt:status", "compressing")
+
+	ctx := context.Background()
+	if err := compressor.CompressVideosWithContext(ctx, videosToCompress, quality); err != nil {
+		a.pptCompressor.Cleanup()
+		a.pptCompressor = nil
+		if ctx.Err() != nil {
+			return PPTCompressResult{Success: false, Message: "取消压缩"}
+		}
+		return PPTCompressResult{Success: false, Message: fmt.Sprintf("压缩视频失败: %v", err)}
+	}
+
+	// 4. 打包文件
+	runtime.EventsEmit(a.ctx, "ppt:status", "repackaging")
+
+	baseName := strings.TrimSuffix(filepath.Base(pptPath), filepath.Ext(pptPath))
+	dir := filepath.Dir(pptPath)
+	outputPath := filepath.Join(dir, baseName+"_compressed.pptx")
+
+	if err := compressor.RepackagePPT(outputPath); err != nil {
+		a.pptCompressor.Cleanup()
+		a.pptCompressor = nil
+		return PPTCompressResult{Success: false, Message: fmt.Sprintf("重新打包 PPT 失败: %v", err)}
+	}
+
+	// 计算节省
+	var totalSaved int64
+	for _, v := range videosToCompress {
+		if v.Compressed {
+			totalSaved += v.Size - v.NewSize
+		}
+	}
+
+	a.pptCompressor.Cleanup()
+	a.pptCompressor = nil
+
+	runtime.EventsEmit(a.ctx, "ppt:complete", outputPath)
+
+	return PPTCompressResult{
+		Success:    true,
+		Message:    fmt.Sprintf("成功压缩 %d 个视频", len(videosToCompress)),
+		OutputPath: outputPath,
+		Videos:     videosToCompress,
+		TotalSaved: totalSaved,
+	}
+}
+
+// CancelPPTCompression 取消 PPT 压缩
+func (a *App) CancelPPTCompression() {
+	if a.pptCompressor != nil {
+		a.pptCompressor.Cancel()
+		runtime.EventsEmit(a.ctx, "ppt:cancelled", true)
+	}
+}

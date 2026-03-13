@@ -90,7 +90,7 @@ func (c *Converter) ConvertMOVToVP9WebMWithContext(ctx context.Context, inputPat
 	}
 
 	// Get video duration for progress calculation
-	duration, err := c.getVideoDuration(inputPath)
+	duration, err := c.GetVideoDuration(inputPath)
 	if err != nil {
 		duration = 0 // Continue without progress reporting
 	}
@@ -195,8 +195,8 @@ func (c *Converter) Cancel() {
 	}
 }
 
-// getVideoDuration returns the duration of a video file in seconds
-func (c *Converter) getVideoDuration(inputPath string) (float64, error) {
+// GetVideoDuration returns the duration of a video file in seconds
+func (c *Converter) GetVideoDuration(inputPath string) (float64, error) {
 	args := []string{
 		"-v", "quiet",
 		"-print_format", "json",
