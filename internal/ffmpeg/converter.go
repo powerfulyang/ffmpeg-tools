@@ -108,22 +108,24 @@ func (c *Converter) ConvertMOVToVP9WebMWithContext(ctx context.Context, inputPat
 		"-i", inputPath,
 		"-c:v", "libvpx-vp9",
 		// 1. 处理 Alpha 预乘问题，通常能解决透明边缘的灰边或杂色
-		"-vf", "premultiply=inplace=1", 
+		"-vf", "premultiply=inplace=1",
 		"-pix_fmt", "yuva420p",
 		// 2. 强制全量程颜色，防止透明背景变深灰
-		"-color_range", "pc", 
+		"-color_range", "pc",
 		"-crf", strconv.Itoa(quality),
 		"-b:v", "0",
 		"-auto-alt-ref", "0",
 		// 3. 某些环境需要 alpha_mode 元数据
-		"-metadata:s:v:0", "alpha_mode=1", 
+		"-metadata:s:v:0", "alpha_mode=1",
 		"-an",
 		"-progress", "pipe:1",
 		"-y",
 		outputPath,
 	}
 
-	cmd := exec.CommandContext(ctx, c.ffmpegPath, args...)
+	// 不使用 exec.CommandContext，因为它在 Windows 上无法可靠终止进程
+	// 改用 exec.Command + 专门的 goroutine 监听取消信号
+	cmd := exec.Command(c.ffmpegPath, args...)
 	hideWindow(cmd)
 	c.currentCmd = cmd
 
@@ -138,21 +140,24 @@ func (c *Converter) ConvertMOVToVP9WebMWithContext(ctx context.Context, inputPat
 		return fmt.Errorf("failed to start FFmpeg: %w", err)
 	}
 
+	// 启动一个 goroutine 监听 context 取消，立即杀死进程树
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			// context 被取消，立即杀死 ffmpeg 进程树
+			killProcessTree(cmd)
+		case <-done:
+			// 正常完成，无需处理
+		}
+	}()
+
 	// Parse progress from stdout
 	scanner := bufio.NewScanner(stdout)
 	timeRegex := regexp.MustCompile(`out_time_ms=(\d+)`)
 
 	for scanner.Scan() {
-		// Check if context is cancelled
-		select {
-		case <-ctx.Done():
-			cmd.Process.Kill()
-			// Clean up partial output file
-			os.Remove(outputPath)
-			return ctx.Err()
-		default:
-		}
-
 		line := scanner.Text()
 		if matches := timeRegex.FindStringSubmatch(line); len(matches) > 1 {
 			if timeMs, err := strconv.ParseFloat(matches[1], 64); err == nil && duration > 0 {
@@ -190,9 +195,7 @@ func (c *Converter) Cancel() {
 	if c.cancelFunc != nil {
 		c.cancelFunc()
 	}
-	if c.currentCmd != nil && c.currentCmd.Process != nil {
-		c.currentCmd.Process.Kill()
-	}
+	killProcessTree(c.currentCmd)
 }
 
 // GetVideoDuration returns the duration of a video file in seconds

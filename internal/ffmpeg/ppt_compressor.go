@@ -313,7 +313,8 @@ func (p *PPTCompressor) CompressVideosWithContext(ctx context.Context, videos []
 			outputPath,
 		}
 
-		cmd := exec.CommandContext(ctx, p.converter.ffmpegPath, args...)
+		// 不使用 exec.CommandContext，因为它在 Windows 上无法可靠终止进程
+		cmd := exec.Command(p.converter.ffmpegPath, args...)
 		hideWindow(cmd)
 		p.currentCmd = cmd
 
@@ -327,20 +328,22 @@ func (p *PPTCompressor) CompressVideosWithContext(ctx context.Context, videos []
 			return fmt.Errorf("启动 FFmpeg 失败: %w", err)
 		}
 
+		// 启动 goroutine 监听 context 取消，立即杀死 ffmpeg 进程树
+		videoDone := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				killProcessTree(cmd)
+			case <-videoDone:
+			}
+		}()
+
 		// 解析进度
 		scanner := bufio.NewScanner(stdout)
 		timeRegex := regexp.MustCompile(`out_time_ms=(\d+)`)
 		duration, _ := p.converter.GetVideoDuration(video.TempPath)
 
 		for scanner.Scan() {
-			select {
-			case <-ctx.Done():
-				cmd.Process.Kill()
-				os.Remove(outputPath)
-				return ctx.Err()
-			default:
-			}
-
 			line := scanner.Text()
 			if matches := timeRegex.FindStringSubmatch(line); len(matches) > 1 {
 				if timeMs, err := strconv.ParseFloat(matches[1], 64); err == nil && duration > 0 {
@@ -356,9 +359,14 @@ func (p *PPTCompressor) CompressVideosWithContext(ctx context.Context, videos []
 		}
 
 		if err := cmd.Wait(); err != nil {
+			close(videoDone)
 			os.Remove(outputPath)
+			if ctx.Err() != nil {
+				return fmt.Errorf("取消压缩")
+			}
 			return fmt.Errorf("压缩视频 %s 失败: %w", video.Name, err)
 		}
+		close(videoDone)
 
 		// 获取新文件大小
 		info, err := os.Stat(outputPath)
@@ -393,9 +401,7 @@ func (p *PPTCompressor) Cancel() {
 	if p.cancelFunc != nil {
 		p.cancelFunc()
 	}
-	if p.currentCmd != nil && p.currentCmd.Process != nil {
-		p.currentCmd.Process.Kill()
-	}
+	killProcessTree(p.currentCmd)
 }
 
 // RepackagePPT 将处理后的文件重新打包为 PPT

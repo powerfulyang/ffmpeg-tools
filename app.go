@@ -69,7 +69,13 @@ func (a *App) CheckFFmpegStatus() map[string]interface{} {
 
 // shutdown is called when the app is closing
 func (a *App) shutdown(ctx context.Context) {
-	// Cleanup if needed
+	// Cancel any running ffmpeg processes to prevent orphaned processes when exiting the program
+	if a.converter != nil {
+		a.converter.Cancel()
+	}
+	if a.pptCompressor != nil {
+		a.pptCompressor.Cancel()
+	}
 }
 
 // SelectInputFile opens a file dialog to select MOV file
@@ -289,7 +295,7 @@ func (a *App) ProcessPPTFile(pptPath string, quality int, onlyMaster bool) PPTCo
 	if err := compressor.CompressVideosWithContext(ctx, videosToCompress, quality); err != nil {
 		a.pptCompressor.Cleanup()
 		a.pptCompressor = nil
-		if ctx.Err() != nil {
+		if strings.Contains(err.Error(), "取消") {
 			return PPTCompressResult{Success: false, Message: "取消压缩"}
 		}
 		return PPTCompressResult{Success: false, Message: fmt.Sprintf("压缩视频失败: %v", err)}
